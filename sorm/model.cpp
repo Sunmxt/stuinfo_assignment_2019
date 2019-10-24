@@ -1,3 +1,5 @@
+#include <glog/logging.h>
+#include <string>
 #include "model.h"
 
 using namespace sorm;
@@ -38,4 +40,62 @@ void Model::sorm_clean_up() {
         delete _sorm_fields;
     }
     _sorm_num_of_fields = 0;
+}
+
+const Field* Model::sorm_primary_key_field(bool allow_duplicated) {
+    const Field *field = _sorm_fields;
+    const Field *primary = 0;
+
+    // locate primary column.
+    for(int i = _sorm_num_of_fields; i ; i--) {
+        if (field -> meta -> props & PrimaryKey) {
+            if (primary) {
+                LOG(WARNING) << "duplicated primary keys found: \"" 
+                           << primary -> meta -> name
+                           << "\" and \""
+                           << field -> meta -> name
+                           << "\"";
+                if (!allow_duplicated) {
+                    LOG(ERROR) << "duplicated primary keys is not allowed. return zero.";
+                    return 0;
+                }
+            }
+            primary = field;
+        }
+    }
+    return primary;
+}
+
+std::string Field::string() const {
+    if (!ref) return std::string();
+
+    switch (value_type) {
+    case INT_MODEL_FIELD:
+        return mapper_value_type_trait<INT_MODEL_FIELD>::ToString(*(int*)ref);
+
+    case CHAR_STRING_FIELD:
+        return "`" + mapper_value_type_trait<CHAR_STRING_FIELD>::ToString((char*)ref) + "`";
+
+    default:
+        LOG(ERROR) << "cannot convert unsupported type " << value_type << " to sql string.";
+    }
+
+    return std::string();
+}
+
+bool Field::is_zero_value() const {
+    if (!ref) return true;
+
+    switch (value_type) {
+    case INT_MODEL_FIELD:
+        return mapper_value_type_trait<INT_MODEL_FIELD>::IsZeroValue(*(int*)ref);
+
+    case CHAR_STRING_FIELD:
+        return mapper_value_type_trait<CHAR_STRING_FIELD>::IsZeroValue((char*)ref);
+
+    default:
+        LOG(ERROR) << "got unsupported type " << value_type;
+    }
+
+    return true;
 }

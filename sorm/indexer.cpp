@@ -70,6 +70,8 @@ int SQLite3Indexer::create_table_according_to_metadata(Model *m) {
                 sql += " primary key"; break;
             case NotNull:
                 sql += " not null"; break;
+            case AutoIncrement:
+                sql += " auto increment"; break;
             }
             props &= ~prop;
         }
@@ -78,15 +80,72 @@ int SQLite3Indexer::create_table_according_to_metadata(Model *m) {
         }
     }
     sql += ");";
-    LOG(INFO) << "execute sqlite: " << sql;
-
-    int retval = sqlite3_exec(db, sql.c_str(), 0, 0, &errmsg);
-    if (SQLITE_OK != retval) {
-        LOG(ERROR) << "sqlite3 error" << retval << " : " << errmsg;
-    }
-    return retval;
+    return _sqlite_exec(sql.c_str());
 }
 
 int SQLite3Indexer::create_table_according_to_metadata(Model &m) {
     return create_table_according_to_metadata(&m);
+}
+
+int SQLite3Indexer::save(Model &m) {
+    // locate primary column.
+    const Field *primary = m.sorm_primary_key_field();
+    if (!primary || primary -> is_zero_value()) {
+        return insert(m);
+    }
+    return _update_all(m, primary);
+}
+
+int SQLite3Indexer::insert(Model &m) {
+    std::string sql("insert into `");
+    sql += SQLite3Indexer::Escape(m.sorm_table_name()) + "`(";
+
+    const Field *field = m.sorm_fields();
+    for(int i = m.sorm_num_of_fields(); i; i--, field++) {
+        if (field -> meta -> props & PrimaryKey) continue;
+
+        sql += field -> meta -> name;
+        if (i > 1) {
+            sql += ",";
+        } else {
+            sql += ") values (";
+        }
+    }
+    field = m.sorm_fields();
+    for(int i = m.sorm_num_of_fields(); i; i--, field++) {
+        if (field -> meta -> props & PrimaryKey) continue;
+
+        sql += field -> meta -> name;
+        if (i > 1) {
+            sql += ",";
+        } else {
+            sql += ")";
+        }
+    }
+    return _sqlite_exec(sql.c_str());
+}
+
+int SQLite3Indexer::_update_all(Model &m, const Field* primary) {
+    std::string sql("update `");
+    sql += SQLite3Indexer::Escape(m.sorm_table_name()) + "` set ";
+
+    const Field *field = m.sorm_fields();
+    for(int i = m.sorm_num_of_fields(); i; i--, field++) {
+        
+    }
+
+    return 0;
+}
+
+int SQLite3Indexer::_sqlite_exec(const char *sql) {
+    char *errmsg;
+    LOG(INFO) << "execute sqlite: " << sql;
+    int retval = sqlite3_exec(db, sql, 0, 0, &errmsg);
+    if (SQLITE_OK != retval) {
+        LOG(ERROR) << "sqlite3 error" << retval << " : " << errmsg;
+    }
+    if (errmsg) {
+        sqlite3_free(errmsg);
+    }
+    return retval;
 }
