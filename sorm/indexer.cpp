@@ -12,13 +12,8 @@ SQLite3Indexer::SQLite3Indexer()
 
 SQLite3Indexer::~SQLite3Indexer() {
     if ( SQLITE_OK != close() ) {
-        throw "cannot close sqlite3 database.";
+        LOG(ERROR) << "cannot close sqlite3 database.";
     }
-}
-
-std::string SQLite3Indexer::Escape(const char *to_escape) {
-    // 防注入后面再做处理.
-    return std::string(to_escape);
 }
 
 int SQLite3Indexer::open(const char *dsn) {
@@ -40,19 +35,19 @@ int SQLite3Indexer::create_table_according_to_metadata(Model *m) {
     char* errmsg;
 
     std::string sql("create table if not exists `");
-    sql += SQLite3Indexer::Escape(table_name).c_str();
+    sql += SQLite3Indexer::Escaper()(table_name).c_str();
     sql += "`(";
 
     const Field *field = m -> sorm_fields();
 
     for(int i = m -> sorm_num_of_fields(); i ; i--, field++) {
-        sql += SQLite3Indexer::Escape(field -> meta -> name);
+        sql += SQLite3Indexer::Escaper()(field -> meta -> name);
 
         switch (field -> value_type) {
         case INT_MODEL_FIELD:
             sql += " integer"; break;
 
-        case CHAR_STRING_FIELD:
+        case STL_STRING_FIELD:
             sql += " varchar(128)"; break;
 
         default:
@@ -89,16 +84,16 @@ int SQLite3Indexer::create_table_according_to_metadata(Model &m) {
 
 int SQLite3Indexer::save(Model &m) {
     // locate primary column.
-    const Field *primary = m.sorm_primary_key_field();
+    Field *primary = m.sorm_primary_key_field();
     if (!primary || primary -> is_zero_value()) {
-        return insert(m);
+        return insert(m, primary);
     }
     return _update_all(m, primary);
 }
 
-int SQLite3Indexer::insert(Model &m) {
+int SQLite3Indexer::insert(Model &m, Field *primary) {
     std::string sql("insert into `");
-    sql += SQLite3Indexer::Escape(m.sorm_table_name()) + "`(";
+    sql += SQLite3Indexer::Escaper()(m.sorm_table_name()) + "`(";
 
     const Field *field = m.sorm_fields();
     for(int i = m.sorm_num_of_fields(); i; i--, field++) {
@@ -115,32 +110,52 @@ int SQLite3Indexer::insert(Model &m) {
     for(int i = m.sorm_num_of_fields(); i; i--, field++) {
         if (field -> meta -> props & PrimaryKey) continue;
 
-        sql += field -> meta -> name;
+        sql += field -> string(SQLite3Indexer::Escaper());
+
         if (i > 1) {
             sql += ",";
         } else {
             sql += ")";
         }
     }
-    return _sqlite_exec(sql.c_str());
-}
-
-int SQLite3Indexer::_update_all(Model &m, const Field* primary) {
-    std::string sql("update `");
-    sql += SQLite3Indexer::Escape(m.sorm_table_name()) + "` set ";
-
-    const Field *field = m.sorm_fields();
-    for(int i = m.sorm_num_of_fields(); i; i--, field++) {
-        
+    int retval = _sqlite_exec(sql.c_str());
+    if (primary) {
+        long long int row_id = sqlite3_last_insert_rowid(db);
+        primary -> parse(row_id);
     }
-
-    return 0;
+    return retval;
 }
 
-int SQLite3Indexer::_sqlite_exec(const char *sql) {
-    char *errmsg;
+int SQLite3Indexer::_update_all(Model &m, Field* primary) {
+    if (m.sorm_num_of_fields() < 2) {
+        return SQLITE_OK;
+    }
+    std::string sql("update `");
+    sql += SQLite3Indexer::Escaper()(m.sorm_table_name()) + "` set `";
+
+    Field *field = m.sorm_fields();
+    for(int i = m.sorm_num_of_fields(); i; i--, field++) {
+        if (field -> meta -> props & PrimaryKey) {
+            continue;
+        }
+        sql += field -> meta -> name;
+        sql += "` = ";
+        sql += field -> string(SQLite3Indexer::Escaper());
+        if (i > 1) {
+            sql += ",`";
+        }
+    }
+    sql += " where `";
+    sql += SQLite3Indexer::Escaper()(primary -> meta -> name);
+    sql += "` = ";
+    sql += primary -> string(SQLite3Indexer::Escaper());
+    return _sqlite_exec(sql.c_str());
+}   
+
+int SQLite3Indexer::_sqlite_exec(const char *sql, int (*callback)(void*,int,char**,char**), void *arg) {
+    char *errmsg = 0;
     LOG(INFO) << "execute sqlite: " << sql;
-    int retval = sqlite3_exec(db, sql, 0, 0, &errmsg);
+    int retval = sqlite3_exec(db, sql, callback, arg, &errmsg);
     if (SQLITE_OK != retval) {
         LOG(ERROR) << "sqlite3 error" << retval << " : " << errmsg;
     }

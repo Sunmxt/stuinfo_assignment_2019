@@ -5,7 +5,7 @@
 using namespace sorm;
 
 Model::Model()
-:_sorm_fields(0), _sorm_num_of_fields(0)
+:_sorm_fields(0), _sorm_num_of_fields(0), inited(false)
 {}
 
 Model::~Model() {
@@ -37,17 +37,17 @@ void Model::sorm_init_metadata() {
 
 void Model::sorm_clean_up() {
     if (_sorm_fields) {
-        delete _sorm_fields;
+        delete[] _sorm_fields;
     }
     _sorm_num_of_fields = 0;
 }
 
-const Field* Model::sorm_primary_key_field(bool allow_duplicated) {
-    const Field *field = _sorm_fields;
-    const Field *primary = 0;
+Field* Model::sorm_primary_key_field(bool allow_duplicated) {
+    Field *field = _sorm_fields;
+    Field *primary = 0;
 
     // locate primary column.
-    for(int i = _sorm_num_of_fields; i ; i--) {
+    for(int i = _sorm_num_of_fields; i ; i--, field++) {
         if (field -> meta -> props & PrimaryKey) {
             if (primary) {
                 LOG(WARNING) << "duplicated primary keys found: \"" 
@@ -66,22 +66,12 @@ const Field* Model::sorm_primary_key_field(bool allow_duplicated) {
     return primary;
 }
 
-std::string Field::string() const {
-    if (!ref) return std::string();
+Field::Field()
+:ref(0), value_type(UNKNOWN_FIELD), meta(0)
+{}
 
-    switch (value_type) {
-    case INT_MODEL_FIELD:
-        return mapper_value_type_trait<INT_MODEL_FIELD>::ToString(*(int*)ref);
+Field::~Field() {}
 
-    case CHAR_STRING_FIELD:
-        return "`" + mapper_value_type_trait<CHAR_STRING_FIELD>::ToString((char*)ref) + "`";
-
-    default:
-        LOG(ERROR) << "cannot convert unsupported type " << value_type << " to sql string.";
-    }
-
-    return std::string();
-}
 
 bool Field::is_zero_value() const {
     if (!ref) return true;
@@ -90,8 +80,8 @@ bool Field::is_zero_value() const {
     case INT_MODEL_FIELD:
         return mapper_value_type_trait<INT_MODEL_FIELD>::IsZeroValue(*(int*)ref);
 
-    case CHAR_STRING_FIELD:
-        return mapper_value_type_trait<CHAR_STRING_FIELD>::IsZeroValue((char*)ref);
+    case STL_STRING_FIELD:
+        return mapper_value_type_trait<STL_STRING_FIELD>::IsZeroValue((*(std::string*)ref));
 
     default:
         LOG(ERROR) << "got unsupported type " << value_type;
